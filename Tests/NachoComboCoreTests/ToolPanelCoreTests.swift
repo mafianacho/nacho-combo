@@ -123,4 +123,13 @@ final class ToolPanelCoreTests: XCTestCase {
         manager.setEnabled(.windowSnap, false)
         XCTAssertEqual(manager.status(of: .windowSnap).dot, .off)
     }
+
+    func testSummarySeparatesPermissionAndErrorFromRunning() {
+        XCTAssertEqual(ToolStatusPresentation.summary(of: [.off, .off]), "0개 켜짐")
+        XCTAssertEqual(ToolStatusPresentation.summary(of: [.on, .on, .off, .off, .off, .off]), "2개 켜짐")
+        XCTAssertEqual(ToolStatusPresentation.summary(of: [.on, .on, .on, .onNeedsSetup, .off, .off]),
+                       "3개 켜짐 · 1개 권한 필요")
+        XCTAssertEqual(ToolStatusPresentation.summary(of: [.on, .onNeedsSetup, .onError]),
+                       "1개 켜짐 · 1개 권한 필요 · 1개 오류")
+    }
 }

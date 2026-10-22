@@ -7,16 +7,18 @@ import NachoComboCore
 final class SettingsWindowController: NSObject {
     private let manager: ModuleManager
     private let organizer: MenuBarOrganizerModule
-    private let window: NSWindow
+    let window: NSWindow
 
-    private var checkboxes: [ModuleID: NSButton] = [:]
+    private var switches: [ModuleID: NSSwitch] = [:]
     private var statusLabels: [ModuleID: NSTextField] = [:]
     private var messageLabels: [ModuleID: NSTextField] = [:]
     private var permissionRows: [ModuleID: NSStackView] = [:]
     private var dots: [ModuleID: StatusDotView] = [:]
     private var pinChecks: [ModuleID: NSButton] = [:]
     private var recorders: [ModuleID: ShortcutRecorderButton] = [:]
+    private var clearButtons: [ModuleID: NSButton] = [:]
     private var shortcutMessages: [ModuleID: NSTextField] = [:]
+    private let summaryLabel = UI.label("", style: .headline, weight: .semibold)
 
     private let collapseButton = NSButton(title: "숨김 아이콘 접기", target: nil, action: nil)
     private let shelfButton = NSButton(title: "선반 열기", target: nil, action: nil)
@@ -24,7 +26,8 @@ final class SettingsWindowController: NSObject {
     private let releaseDimButton = NSButton(title: "디밍 즉시 해제", target: nil, action: nil)
     private let dimSlider = NSSlider(value: 0.5, minValue: FocusDimLogic.minimumIntensity,
                                      maxValue: FocusDimLogic.maximumIntensity, target: nil, action: nil)
-    private let dimLabel = NSTextField(labelWithString: "")
+    private let dimLabel = UI.label("", style: .callout, color: UI.secondaryText)
+    private let dimValueLabel = UI.label("", style: .callout, color: .labelColor)
 
     var openAccessibilitySettings: (() -> Void)?
     var recheckPermission: (() -> Void)?
@@ -40,6 +43,10 @@ final class SettingsWindowController: NSObject {
     /// Returns an error message when the shortcut was refused (policy or OS), nil when it was saved/cleared.
     var shortcutRecorded: ((ModuleID, ToolShortcut?) -> String?)?
     var recordingChanged: ((Bool) -> Void)?
+
+    private static let cardWidth: CGFloat = 480
+    private static let cardInset: CGFloat = 16
+    private static var innerWidth: CGFloat { cardWidth - 2 * cardInset }
 
     private static let hints: [ModuleID: String] = [
         .menuBar: "구분선(┊) 왼쪽의 아이콘을 접습니다. 숨길 아이콘은 ⌘ 키를 누른 채 구분선 왼쪽으로 끌어 놓습니다. 권한 불필요.",
@@ -64,6 +71,11 @@ final class SettingsWindowController: NSObject {
 
     var isVisible: Bool { window.isVisible }
 
+    /// Debug readout of the accessibility elements of the settings window (`ctl a11y settings`).
+    var accessibilityTree: [[String: String]] {
+        window.contentView.map { UI.accessibilityTree(of: $0) } ?? []
+    }
+
     func show() {
         refresh()
         if !window.isVisible {
@@ -82,24 +94,18 @@ final class SettingsWindowController: NSObject {
         let content = NSView()
         window.contentView = content
 
-        let title = NSTextField(labelWithString: "Nacho Combo")
-        title.font = NSFont.boldSystemFont(ofSize: 18)
-        let subtitle = NSTextField(wrappingLabelWithString:
-            "각 도구를 따로 켜고 끕니다. 끄면 그 도구의 감시·단축키·오버레이가 모두 중지됩니다. 이 창을 닫아도 켜 둔 도구는 계속 동작합니다.")
-        subtitle.textColor = .secondaryLabelColor
-        subtitle.font = NSFont.systemFont(ofSize: 11)
-        subtitle.preferredMaxLayoutWidth = 480
-        let header = NSStackView(views: [title, subtitle])
-        header.orientation = .vertical
-        header.alignment = .leading
-        header.spacing = 4
-        header.translatesAutoresizingMaskIntoConstraints = false
+        // No second app title (the window title already says it): the first line answers what is on right now.
+        summaryLabel.setAccessibilityIdentifier("settings-summary")
+        let subtitle = UI.wrapLabel(
+            "각 도구를 따로 켜고 끕니다. 끄면 그 도구의 감시·단축키·오버레이가 모두 중지됩니다. 이 창을 닫아도 켜 둔 도구는 계속 동작합니다.",
+            width: 500, style: .callout)
+        let header = UI.vstack([summaryLabel, subtitle], spacing: 4)
 
         let list = NSStackView()
         list.orientation = .vertical
         list.alignment = .leading
-        list.spacing = 6
-        list.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
+        list.spacing = 12
+        list.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 8, right: 0)
         list.translatesAutoresizingMaskIntoConstraints = false
         for id in ModuleID.allCases { list.addArrangedSubview(makeCard(for: id)) }
 
@@ -114,15 +120,14 @@ final class SettingsWindowController: NSObject {
 
         let quit = NSButton(title: "Nacho Combo 종료", target: self, action: #selector(quitClicked))
         quit.setAccessibilityIdentifier("quit-app")
-        let footnote = NSTextField(wrappingLabelWithString:
-            "종료하면 모든 가젯이 정리됩니다. 설정은 자동 저장되어 다음 실행 때 복원됩니다. 메뉴 막대의 NC ▸ 설정…에서 이 창을 다시 열 수 있습니다.")
-        footnote.font = NSFont.systemFont(ofSize: 11)
-        footnote.textColor = .secondaryLabelColor
-        footnote.preferredMaxLayoutWidth = 330
+        quit.setAccessibilityHelp("모든 도구의 감시·단축키·오버레이를 정리하고 앱을 종료합니다")
+        let footnote = UI.wrapLabel(
+            "종료하면 모든 도구가 정리됩니다. 설정은 자동 저장되어 다음 실행 때 복원됩니다. 메뉴 막대의 NC ▸ 설정…에서 이 창을 다시 열 수 있습니다.",
+            width: 330, style: .subheadline)
         let footer = NSStackView(views: [footnote, quit])
         footer.orientation = .horizontal
         footer.alignment = .centerY
-        footer.spacing = 12
+        footer.spacing = 16
         footer.translatesAutoresizingMaskIntoConstraints = false
 
         content.addSubview(header)
@@ -132,13 +137,13 @@ final class SettingsWindowController: NSObject {
             header.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             header.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             header.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 12),
             scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            scroll.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -10),
+            scroll.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
             footer.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             footer.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -20),
-            footer.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
+            footer.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
             document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
             document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
@@ -150,107 +155,80 @@ final class SettingsWindowController: NSObject {
     }
 
     private func makeCard(for id: ModuleID) -> NSView {
-        let check = NSButton(checkboxWithTitle: id.displayName, target: self, action: #selector(toggled(_:)))
-        check.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
-        check.identifier = NSUserInterfaceItemIdentifier(id.rawValue)
-        check.setAccessibilityIdentifier("toggle-\(id.rawValue)")
-        checkboxes[id] = check
+        let width = SettingsWindowController.innerWidth
 
-        let status = NSTextField(labelWithString: "")
-        status.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        status.alignment = .right
+        // Header row: symbol, name, state (dot + words), the switch.
+        let symbol = UI.symbolView(id.symbolName, size: 16, tint: UI.secondaryText)
+        let name = UI.label(id.displayName, style: .headline, weight: .semibold)
+        name.setAccessibilityElement(false)       // the switch carries the name as its accessibility label
+
+        let toggle = NSSwitch()
+        toggle.identifier = NSUserInterfaceItemIdentifier(id.rawValue)
+        toggle.target = self
+        toggle.action = #selector(toggled(_:))
+        toggle.setAccessibilityLabel("\(id.displayName) 사용")
+        toggle.setAccessibilityIdentifier("toggle-\(id.rawValue)")
+        switches[id] = toggle
+
+        let status = UI.label("", style: .callout, weight: .medium, color: UI.secondaryText)
+        status.alignment = .left                 // the word sits right next to its dot
+        status.translatesAutoresizingMaskIntoConstraints = false
+        status.widthAnchor.constraint(equalToConstant: 72).isActive = true       // the dot keeps its place for every state
         status.setAccessibilityIdentifier("status-\(id.rawValue)")
+        status.setAccessibilityLabel("\(id.displayName) 상태")
         statusLabels[id] = status
 
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let dot = StatusDotView()
+        dot.setAccessibilityRole(.image)
         dots[id] = dot
-        let top = NSStackView(views: [dot, check, spacer, status])
-        top.orientation = .horizontal
-        top.alignment = .centerY
-        top.spacing = 8
-        top.translatesAutoresizingMaskIntoConstraints = false
-        top.widthAnchor.constraint(equalToConstant: 480).isActive = true
 
-        let hint = NSTextField(wrappingLabelWithString: SettingsWindowController.hints[id] ?? "")
-        hint.textColor = .secondaryLabelColor
-        hint.font = NSFont.systemFont(ofSize: 11)
-        hint.preferredMaxLayoutWidth = 470
+        // Dot and state words are one fixed-width group: the dot always sits right next to its words, in every card.
+        let state = UI.hstack([dot, status], spacing: 6)
+        state.widthAnchor.constraint(equalToConstant: StatusDotView.width + 6 + 72).isActive = true
+        let top = UI.hstack([symbol, name, UI.spacer(), state, toggle], spacing: 8)
+        top.setCustomSpacing(12, after: state)
+        top.widthAnchor.constraint(equalToConstant: width).isActive = true
 
-        let message = NSTextField(wrappingLabelWithString: "")
-        message.font = NSFont.systemFont(ofSize: 11)
-        message.textColor = .systemRed
-        message.preferredMaxLayoutWidth = 470
+        let hint = UI.wrapLabel(SettingsWindowController.hints[id] ?? "", width: width, style: .callout)
+
+        let message = UI.wrapLabel("", width: width, style: .callout, color: .labelColor)
         message.isHidden = true
         messageLabels[id] = message
 
-        let card = NSStackView(views: [top, hint, message])
-        card.orientation = .vertical
-        card.alignment = .leading
-        card.spacing = 3
-
-        // Menu bar pin and tool-open shortcut: both are separate from ON/OFF.
-        let pin = NSButton(checkboxWithTitle: "메뉴 막대에 고정 (아이콘을 누르면 이 도구 화면으로 바로 이동)", target: self,
-                           action: #selector(pinToggled(_:)))
-        pin.font = NSFont.systemFont(ofSize: 11)
-        pin.identifier = NSUserInterfaceItemIdentifier(id.rawValue)
-        pin.setAccessibilityIdentifier("pin-\(id.rawValue)")
-        pinChecks[id] = pin
-        let recorder = ShortcutRecorderButton()
-        recorder.controlSize = .small
-        recorder.font = NSFont.systemFont(ofSize: 11)
-        recorder.setAccessibilityIdentifier("shortcut-\(id.rawValue)")
-        recorder.setAccessibilityLabel("\(id.displayName) 화면 열기 단축키")
-        recorder.onRecordingChange = { [weak self] on in self?.recordingChanged?(on) }
-        recorder.onRecord = { [weak self] shortcut in self?.record(id, shortcut) }
-        recorders[id] = recorder
-        let clear = NSButton(title: "해제", target: self, action: #selector(clearShortcutClicked(_:)))
-        clear.controlSize = .small
-        clear.font = NSFont.systemFont(ofSize: 11)
-        clear.identifier = NSUserInterfaceItemIdentifier(id.rawValue)
-        clear.setAccessibilityIdentifier("shortcut-clear-\(id.rawValue)")
-        let shortcutTitle = NSTextField(labelWithString: "화면 열기 단축키")
-        shortcutTitle.font = NSFont.systemFont(ofSize: 11)
-        shortcutTitle.textColor = .secondaryLabelColor
-        let shortcutMessage = NSTextField(wrappingLabelWithString: "")
-        shortcutMessage.font = NSFont.systemFont(ofSize: 11)
-        shortcutMessage.textColor = .systemRed
-        shortcutMessage.preferredMaxLayoutWidth = 470
-        shortcutMessage.isHidden = true
-        shortcutMessage.setAccessibilityIdentifier("shortcut-message-\(id.rawValue)")
-        shortcutMessages[id] = shortcutMessage
-        card.addArrangedSubview(pin)
-        card.addArrangedSubview(actionRow([shortcutTitle, recorder, clear]))
-        card.addArrangedSubview(shortcutMessage)
+        let card = UI.vstack([top, hint, message], spacing: 8)
+        card.setCustomSpacing(4, after: top)
 
         // Permission guidance lives with the gadget that needs it.
         switch id {
         case .windowSnap:
-            let row = permissionButtons(open: #selector(openAccessibilityClicked), title: "손쉬운 사용 설정 열기",
+            let row = permissionButtons(for: id, open: #selector(openAccessibilityClicked), title: "손쉬운 사용 설정 열기",
                                         recheck: #selector(recheckAccessibilityClicked))
             permissionRows[id] = row
             card.addArrangedSubview(row)
         case .captureFloat:
-            let row = permissionButtons(open: #selector(openScreenClicked), title: "화면 기록 설정 열기",
+            let row = permissionButtons(for: id, open: #selector(openScreenClicked), title: "화면 기록 설정 열기",
                                         recheck: #selector(recheckScreenClicked))
             permissionRows[id] = row
             card.addArrangedSubview(row)
         default: break
         }
 
+        // The tool's own actions.
         switch id {
         case .menuBar:
             collapseButton.target = self
             collapseButton.action = #selector(collapseClicked)
+            collapseButton.setAccessibilityIdentifier("collapse-button")
             card.addArrangedSubview(actionRow([collapseButton]))
         case .fileShelf:
             shelfButton.target = self
             shelfButton.action = #selector(shelfClicked)
+            shelfButton.setAccessibilityIdentifier("shelf-button")
             card.addArrangedSubview(actionRow([shelfButton]))
         case .captureFloat:
             captureButton.target = self
             captureButton.action = #selector(captureClicked)
+            captureButton.setAccessibilityIdentifier("capture-button")
             card.addArrangedSubview(actionRow([captureButton]))
         case .focusDim:
             dimSlider.target = self
@@ -258,28 +236,80 @@ final class SettingsWindowController: NSObject {
             dimSlider.isContinuous = true
             dimSlider.widthAnchor.constraint(equalToConstant: 200).isActive = true
             dimSlider.setAccessibilityIdentifier("dim-intensity")
+            dimSlider.setAccessibilityLabel("디밍 강도")
             releaseDimButton.target = self
             releaseDimButton.action = #selector(releaseDimClicked)
-            card.addArrangedSubview(actionRow([dimLabel, dimSlider, releaseDimButton]))
+            releaseDimButton.setAccessibilityIdentifier("dim-release")
+            dimValueLabel.alignment = .right
+            dimValueLabel.font = UI.digitsFont(.callout)
+            dimValueLabel.translatesAutoresizingMaskIntoConstraints = false
+            dimValueLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+            dimValueLabel.setAccessibilityIdentifier("dim-value")
+            card.addArrangedSubview(actionRow([dimLabel, dimSlider, dimValueLabel, releaseDimButton]))
         default: break
         }
 
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        let wrapper = NSStackView(views: [card, separator])
-        wrapper.orientation = .vertical
-        wrapper.alignment = .leading
-        wrapper.spacing = 6
-        separator.widthAnchor.constraint(equalToConstant: 480).isActive = true
-        return wrapper
+        // Menu bar pin and tool-open shortcut: both are separate from ON/OFF.
+        let pin = NSButton(checkboxWithTitle: "메뉴 막대에 고정", target: self, action: #selector(pinToggled(_:)))
+        pin.font = UI.font(.callout)
+        pin.identifier = NSUserInterfaceItemIdentifier(id.rawValue)
+        pin.setAccessibilityIdentifier("pin-\(id.rawValue)")
+        pin.setAccessibilityLabel("\(id.displayName) 메뉴 막대에 고정")
+        pin.setAccessibilityHelp("고정하면 아이콘을 눌러 이 도구 화면으로 바로 이동합니다. 켜기·끄기와는 별개입니다")
+        pin.toolTip = "아이콘을 누르면 이 도구 화면으로 바로 이동"
+        pinChecks[id] = pin
+
+        let recorder = ShortcutRecorderButton()
+        recorder.font = UI.font(.callout)
+        recorder.translatesAutoresizingMaskIntoConstraints = false
+        recorder.widthAnchor.constraint(equalToConstant: 168).isActive = true      // "해제" keeps its place in every card
+        recorder.setAccessibilityIdentifier("shortcut-\(id.rawValue)")
+        recorder.setAccessibilityLabel("\(id.displayName) 화면 열기 단축키")
+        recorder.setAccessibilityHelp("누른 뒤 새 단축키를 입력합니다. Esc로 취소합니다")
+        recorder.onRecordingChange = { [weak self] on in self?.recordingChanged?(on) }
+        recorder.onRecord = { [weak self] shortcut in self?.record(id, shortcut) }
+        recorders[id] = recorder
+        let clear = NSButton(title: "해제", target: self, action: #selector(clearShortcutClicked(_:)))
+        clear.font = UI.font(.callout)
+        clear.identifier = NSUserInterfaceItemIdentifier(id.rawValue)
+        clear.setAccessibilityIdentifier("shortcut-clear-\(id.rawValue)")
+        clear.setAccessibilityLabel("\(id.displayName) 화면 열기 단축키 해제")
+        clearButtons[id] = clear
+        let shortcutTitle = UI.label("화면 열기 단축키", style: .callout, color: UI.secondaryText)
+        shortcutTitle.setAccessibilityElement(false)
+        let shortcutMessage = UI.wrapLabel("", width: width, style: .callout, color: .labelColor)
+        shortcutMessage.isHidden = true
+        shortcutMessage.setAccessibilityIdentifier("shortcut-message-\(id.rawValue)")
+        shortcutMessages[id] = shortcutMessage
+
+        let lastBefore = card.arrangedSubviews.last ?? hint
+        card.addArrangedSubview(pin)
+        card.setCustomSpacing(12, after: lastBefore)      // the tool's controls and the shared pin/shortcut settings read as two groups
+        card.addArrangedSubview(actionRow([shortcutTitle, recorder, clear]))
+        card.addArrangedSubview(shortcutMessage)
+
+        let surface = CardView()
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        surface.addSubview(card)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: SettingsWindowController.cardInset),
+            card.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -SettingsWindowController.cardInset),
+            card.topAnchor.constraint(equalTo: surface.topAnchor, constant: 14),
+            card.bottomAnchor.constraint(equalTo: surface.bottomAnchor, constant: -14),
+            surface.widthAnchor.constraint(equalToConstant: SettingsWindowController.cardWidth),
+        ])
+        return surface
     }
 
-    private func permissionButtons(open: Selector, title: String, recheck: Selector) -> NSStackView {
-        let row = NSStackView(views: [
-            NSButton(title: title, target: self, action: open),
-            NSButton(title: "권한 다시 확인", target: self, action: recheck),
-        ])
+    private func permissionButtons(for id: ModuleID, open: Selector, title: String, recheck: Selector) -> NSStackView {
+        let openButton = NSButton(title: title, target: self, action: open)
+        let recheckButton = NSButton(title: "권한 다시 확인", target: self, action: recheck)
+        openButton.setAccessibilityLabel("\(id.displayName) \(title)")
+        recheckButton.setAccessibilityLabel("\(id.displayName) 권한 다시 확인")
+        openButton.setAccessibilityIdentifier("permission-open-\(id.rawValue)")
+        recheckButton.setAccessibilityIdentifier("permission-recheck-\(id.rawValue)")
+        let row = NSStackView(views: [openButton, recheckButton])
         row.orientation = .horizontal
         row.spacing = 8
         row.isHidden = true
@@ -297,23 +327,24 @@ final class SettingsWindowController: NSObject {
     // MARK: state
 
     func refresh() {
+        var dotKinds: [StatusDotKind] = []
         for id in ModuleID.allCases {
             let enabled = manager.settings.isEnabled(id)
             let state = manager.states[id] ?? .off
-            checkboxes[id]?.state = enabled ? .on : .off
+            switches[id]?.state = enabled ? .on : .off
 
             var text = state.label
-            var color = NSColor.secondaryLabelColor
-            var message = ""
+            var color = UI.secondaryText
+            var message: NSAttributedString?
             switch state {
             case .running:
-                color = .systemGreen
+                color = .labelColor
             case .needsPermission(let m):
-                color = .systemOrange
-                message = "⚠︎ " + m + "\n허용하기 전까지 이 가젯은 동작하지 않습니다."
+                color = .labelColor
+                message = UI.notice(m + "\n허용하기 전까지 이 도구는 동작하지 않습니다.", tint: .systemOrange, style: .callout)
             case .failed(let m):
-                color = .systemRed
-                message = "⚠︎ " + m
+                color = .labelColor
+                message = UI.notice(m, tint: .systemRed, style: .callout)
             case .off:
                 break
             }
@@ -323,14 +354,22 @@ final class SettingsWindowController: NSObject {
             dots[id]?.setAccessibilityLabel("\(id.displayName) 상태: \(manager.status(of: id).accessibilityText)")
             pinChecks[id]?.state = manager.settings.isPinned(id) ? .on : .off
             if recorders[id]?.isRecording != true { recorders[id]?.shortcut = manager.settings.shortcut(for: id) }
+            clearButtons[id]?.isEnabled = manager.settings.shortcut(for: id) != nil      // nothing to clear when unset
+            dotKinds.append(manager.status(of: id).dot)
             statusLabels[id]?.stringValue = text
             statusLabels[id]?.textColor = color
-            messageLabels[id]?.stringValue = message
-            messageLabels[id]?.isHidden = message.isEmpty
+            if let message = message {
+                messageLabels[id]?.attributedStringValue = message
+                messageLabels[id]?.isHidden = false
+            } else {
+                messageLabels[id]?.stringValue = ""
+                messageLabels[id]?.isHidden = true
+            }
             if let row = permissionRows[id] {
                 if case .needsPermission = state { row.isHidden = false } else { row.isHidden = true }
             }
         }
+        summaryLabel.stringValue = "\(ModuleID.allCases.count)개 도구 중 " + ToolStatusPresentation.summary(of: dotKinds)
         let running: (ModuleID) -> Bool = { self.manager.states[$0] == .running }
         collapseButton.isEnabled = organizer.isRunning
         collapseButton.title = organizer.collapsed ? "숨김 아이콘 펼치기" : "숨김 아이콘 접기"
@@ -339,12 +378,19 @@ final class SettingsWindowController: NSObject {
         captureButton.isEnabled = running(.captureFloat)
         releaseDimButton.isEnabled = running(.focusDim)
         dimSlider.doubleValue = manager.settings.dimIntensity
-        dimLabel.stringValue = "강도 \(Int((manager.settings.dimIntensity * 100).rounded()))%"
+        let percent = Int((manager.settings.dimIntensity * 100).rounded())
+        let dimRunning = running(.focusDim)
+        dimSlider.isEnabled = dimRunning          // off: the slider is dimmed, not blue and inviting
+        dimLabel.stringValue = "강도"
+        dimLabel.textColor = dimRunning ? UI.secondaryText : UI.tertiaryText
+        dimValueLabel.textColor = dimRunning ? .labelColor : UI.tertiaryText
+        dimValueLabel.stringValue = "\(percent)%"
+        dimSlider.setAccessibilityValueDescription("\(percent)%")
     }
 
     // MARK: actions
 
-    @objc private func toggled(_ sender: NSButton) {
+    @objc private func toggled(_ sender: NSSwitch) {
         guard let raw = sender.identifier?.rawValue, let id = ModuleID(rawValue: raw) else { return }
         manager.setEnabled(id, sender.state == .on)
     }
@@ -359,8 +405,13 @@ final class SettingsWindowController: NSObject {
     }
     private func record(_ id: ModuleID, _ shortcut: ToolShortcut) {
         let issue = shortcutRecorded?(id, shortcut)
-        shortcutMessages[id]?.stringValue = issue.map { "⚠︎ \(shortcut.label): \($0)" } ?? ""
-        shortcutMessages[id]?.isHidden = issue == nil
+        if let issue = issue {
+            shortcutMessages[id]?.attributedStringValue = UI.notice("\(shortcut.label): \(issue)", tint: .systemOrange, style: .callout)
+            shortcutMessages[id]?.isHidden = false
+        } else {
+            shortcutMessages[id]?.stringValue = ""
+            shortcutMessages[id]?.isHidden = true
+        }
     }
     @objc private func collapseClicked() { organizer.setCollapsed(!organizer.collapsed) }
     @objc private func shelfClicked() { toggleShelf?() }

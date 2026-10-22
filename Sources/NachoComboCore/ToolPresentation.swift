@@ -65,3 +65,17 @@ public struct ToolStatusPresentation: Equatable {
         }
     }
 }
+
+public extension ToolStatusPresentation {
+    /// "3개 켜짐 · 1개 권한 필요 · 1개 오류": only tools that really run count as on; a tool that is switched on but
+    /// still waits for a permission (or failed) is named separately instead of being counted as on.
+    static func summary(of dots: [StatusDotKind]) -> String {
+        let running = dots.filter { $0 == .on }.count
+        let setup = dots.filter { $0 == .onNeedsSetup }.count
+        let failed = dots.filter { $0 == .onError }.count
+        var text = "\(running)개 켜짐"
+        if setup > 0 { text += " · \(setup)개 권한 필요" }
+        if failed > 0 { text += " · \(failed)개 오류" }
+        return text
+    }
+}

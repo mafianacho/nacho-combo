@@ -45,12 +45,16 @@ final class ShortcutRecorderButton: NSButton {
     }
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshTitle()
+    }
+
     private func refreshTitle() {
-        if isRecording {
-            title = "키를 누르세요… (Esc 취소)"
-        } else {
-            title = shortcut?.label ?? "미설정 — 클릭해서 지정"
-        }
+        let text = isRecording ? "키를 누르세요… (Esc 취소)" : (shortcut?.label ?? "미설정 — 클릭해서 지정")
+        // The control glyph (U+2303) is enlarged so it does not read as a plain "^".
+        attributedTitle = UI.styled(text, font: UI.font(.callout), color: .labelColor)
+        setAccessibilityValue(text)
     }
 
     @objc private func clicked() { isRecording ? stop() : start() }

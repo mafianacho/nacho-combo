@@ -21,8 +21,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PanelHost, NSMenuDeleg
     private var lastExternalApp: NSRunningApplication?
     private var workspaceObserver: NSObjectProtocol?
     private var lastShortcutResult = "-"
+    private var lastA11y: [String: Any] = [:]
 
-    init(debugCtl: Bool) { self.debugCtl = debugCtl }
+    init(debugCtl: Bool) {
+        self.debugCtl = debugCtl
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         organizer = MenuBarOrganizerModule(initiallyCollapsed: store.load().menuBarCollapsed)
@@ -137,6 +140,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PanelHost, NSMenuDeleg
         var labels: [String: String] = [:]
         for id in ModuleID.allCases { if let s = manager.settings.shortcut(for: id) { labels[id.rawValue] = s.label } }
         extra["toolShortcutLabels"] = labels
+        // How the UI currently looks to the system: light/dark, the accent color the controls follow, Reduce Motion.
+        extra["appearance"] = NSApp.effectiveAppearance.name.rawValue
+        if let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) {
+            extra["accentRGB"] = String(format: "%.2f,%.2f,%.2f", accent.redComponent, accent.greenComponent, accent.blueComponent)
+        }
+        extra["reduceMotion"] = UI.reduceMotion
+        if !lastA11y.isEmpty { extra["a11y"] = lastA11y }
         Diagnostics.write(manager: manager, extra: extra)
     }
 
@@ -339,6 +349,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, PanelHost, NSMenuDeleg
             case "back": panel.back()
             case "close": panel.close()
             default: break
+            }
+        case "a11y" where parts.count == 2:
+            // Accessibility elements (role / label / value / help / key) of the visible screen, read from AppKit.
+            switch parts[1] {
+            case "panel": lastA11y = ["panel": panel.accessibilityTree, "route": panel.route.name]
+            case "settings": lastA11y = ["settings": settingsWindow.accessibilityTree]
+            default: lastA11y = [:]
+            }
+        case "snapshot" where parts.count == 3:
+            let window: NSWindow? = parts[1] == "panel" ? panel.window : settingsWindow.window
+            if let w = window, w.windowNumber > 0,
+               let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(w.windowNumber),
+                                                   [.boundsIgnoreFraming]) {
+                let rep = NSBitmapImageRep(cgImage: image)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: parts[2]))
+            }
+        case "settings" where parts.count == 2 && parts[1] == "show":
+            settingsWindow.show()
+        case "appearance" where parts.count == 2:
+            // Debug-only override to capture both looks; "system" returns to following the OS.
+            switch parts[1] {
+            case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+            case "light": NSApp.appearance = NSAppearance(named: .aqua)
+            default: NSApp.appearance = nil
             }
         case "quit":
             NSApp.terminate(nil)

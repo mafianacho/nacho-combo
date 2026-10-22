@@ -55,7 +55,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         content.onSelect = { [weak self] id in self?.navigate(to: .tool(id)) }
         popover.contentViewController = content
         popover.behavior = .transient
-        popover.animates = false
+        popover.animates = false      // no motion at all: nothing here may start moving when Reduce Motion is on
         popover.delegate = self
     }
 
@@ -155,12 +155,34 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     var diagnostics: [String: Any] {
         ["shown": popover.isShown, "route": route.name, "showCount": showCount, "backCount": backCount,
-         "liveTimer": liveTimer?.isValid ?? false]
+         "liveTimer": liveTimer?.isValid ?? false, "popoverAnimates": popover.animates]
     }
+
+    /// Debug readout of the accessibility elements of the visible panel screen (`ctl a11y panel`).
+    var accessibilityTree: [[String: String]] { UI.accessibilityTree(of: content.view) }
+
+    /// Debug: the window server's own picture of the popover window (what the app really composited), to tell an
+    /// app drawing defect from a stale frame in a captured screen.
+    var window: NSWindow? { content.view.window }
 }
 
 final class PanelRootView: NSView {
     var onEscape: (() -> Void)?
+
+    /// The popover hosts its content in a vibrancy view whose (vibrant) appearance makes fills and text blend with what
+    /// is already there instead of replacing it - so a changed label kept the old glyphs on screen (real-OS captures
+    /// that stayed garbled for 40 s+). A plain light/dark appearance on our own root view gives normal painting; the
+    /// light/dark choice still follows the system.
+    func applyBaseAppearance() {
+        let match = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+        let wanted = NSAppearance(named: match ?? .aqua)
+        if appearance?.name != wanted?.name { appearance = wanted }
+    }
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityRole(.group)
+    }
+    required init?(coder: NSCoder) { fatalError("not used") }
     override var acceptsFirstResponder: Bool { true }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { onEscape?() } else { super.keyDown(with: event) }
@@ -186,6 +208,7 @@ final class PanelViewController: NSViewController {
     func show(route: PanelRoute) {
         guard let host = host else { return }
         _ = view
+        (view as? PanelRootView)?.applyBaseAppearance()
         current?.removeFromSuperview()
         listView = nil
         detailView = nil
@@ -204,6 +227,10 @@ final class PanelViewController: NSViewController {
         }
         child.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(child)
+        switch route {
+        case .list: view.setAccessibilityLabel("Nacho Combo 도구 목록")
+        case .tool(let id): view.setAccessibilityLabel("\(id.displayName) 조작 화면")
+        }
         NSLayoutConstraint.activate([
             child.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             child.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -215,6 +242,7 @@ final class PanelViewController: NSViewController {
     }
 
     func refresh() {
+        (view as? PanelRootView)?.applyBaseAppearance()
         listView?.update()
         detailView?.update()
         guard let child = current else { return }
